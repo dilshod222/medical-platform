@@ -1,0 +1,76 @@
+services:
+  # Django REST API
+  - type: web
+    name: medconnect-demo-api-2026-uz
+    runtime: python
+    plan: free
+    region: frankfurt
+    rootDir: backend
+
+    buildCommand: bash build.sh
+
+    startCommand: >-
+      gunicorn config.wsgi:application
+      --bind 0.0.0.0:$PORT
+      --workers ${WEB_CONCURRENCY:-1}
+      --timeout 120
+
+    healthCheckPath: /api/health/
+
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+
+      - key: DEBUG
+        value: "0"
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: medconnect-demo-db-2026-uz
+          property: connectionString
+
+      - key: ALLOWED_HOSTS
+        value: >-
+          medconnect-demo-api-2026-uz.onrender.com
+
+      - key: CORS_ALLOWED_ORIGINS
+        value: >-
+          https://medconnect-demo-2026-uz.onrender.com
+
+      - key: CSRF_TRUSTED_ORIGINS
+        value: >-
+          https://medconnect-demo-2026-uz.onrender.com
+
+      - key: SEED_STAGING
+        value: "1"
+
+      # Blueprint yaratishda Render sizdan
+      # demo parolni kiritishni so‘raydi.
+      - key: STAGING_DEMO_PASSWORD
+        sync: false
+
+
+  # React + Vite frontend
+  - type: web
+    name: medconnect-demo-2026-uz
+    runtime: static
+    rootDir: frontend
+
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: >-
+          https://medconnect-demo-api-2026-uz.onrender.com/api
+
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+
+databases:
+  - name: medconnect-demo-db-2026-uz
+    plan: free
+    region: frankfurt

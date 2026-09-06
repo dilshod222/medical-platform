@@ -1,0 +1,23 @@
+html,
+body,
+#root {
+  min-width: 100%;
+  min-height: 100%;
+}
+
+html {
+  background: #f8fafc;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input {
+  font: inherit;
+}
