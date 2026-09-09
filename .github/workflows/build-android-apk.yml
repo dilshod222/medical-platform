@@ -34,17 +34,40 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
+      - name: Build release APK
         working-directory: android-wrapper
-        run: gradle :app:assembleDebug --stacktrace
+        run: gradle :app:assembleRelease --stacktrace
 
-      - name: Rename APK
-        run: cp android-wrapper/app/build/outputs/apk/debug/app-debug.apk MedConnect.apk
+      - name: Create release signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore medconnect-release.jks \
+            -storepass medconnect2026 \
+            -keypass medconnect2026 \
+            -alias medconnect \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=MedConnect, OU=Mobile, O=MedConnect, L=Tashkent, C=UZ"
+
+      - name: Sign release APK
+        run: |
+          $ANDROID_HOME/build-tools/35.0.0/apksigner sign \
+            --ks medconnect-release.jks \
+            --ks-key-alias medconnect \
+            --ks-pass pass:medconnect2026 \
+            --key-pass pass:medconnect2026 \
+            --out MedConnect.apk \
+            android-wrapper/app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Verify APK signature
+        run: |
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs MedConnect.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MedConnect-APK
+          name: MedConnect-Release-APK
           path: MedConnect.apk
           if-no-files-found: error
           retention-days: 14
