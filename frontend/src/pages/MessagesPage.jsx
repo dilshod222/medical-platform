@@ -28,6 +28,9 @@ import {
 } from 'react-router-dom';
 
 import api from '../api/client';
+import TablePagination, {
+  DEFAULT_PAGE_SIZE,
+} from '../components/TablePagination';
 
 
 const STAFF_ROLES = ['DOCTOR', 'ADMIN', 'SUPERADMIN'];
@@ -114,6 +117,7 @@ function MessagesPage() {
   const [staffFilter, setStaffFilter] = useState('');
   const [patientFilter, setPatientFilter] = useState('');
   const [visibilityFilter, setVisibilityFilter] = useState('all');
+  const [auditPage, setAuditPage] = useState(1);
 
   const [messageText, setMessageText] = useState('');
   const [loadingThreads, setLoadingThreads] = useState(true);
@@ -136,6 +140,47 @@ function MessagesPage() {
 
   const isSupervisor = isSupervisorRole && auditMode;
   const canStartChat = STAFF_ROLES.includes(user.role);
+
+
+  useEffect(() => {
+    setAuditPage(1);
+  }, [
+    search,
+    staffFilter,
+    patientFilter,
+    visibilityFilter,
+    auditMode,
+  ]);
+
+
+  const auditTotalPages = Math.max(
+    1,
+    Math.ceil(
+      threads.length / DEFAULT_PAGE_SIZE
+    )
+  );
+
+
+  useEffect(() => {
+    if (auditPage > auditTotalPages) {
+      setAuditPage(auditTotalPages);
+    }
+  }, [auditPage, auditTotalPages]);
+
+
+  const paginatedAuditThreads = useMemo(
+    () => {
+      const start = (
+        auditPage - 1
+      ) * DEFAULT_PAGE_SIZE;
+
+      return threads.slice(
+        start,
+        start + DEFAULT_PAGE_SIZE
+      );
+    },
+    [threads, auditPage]
+  );
 
 
   useEffect(() => {
@@ -870,6 +915,7 @@ function MessagesPage() {
             <table className="dashboard-table chat-management-table">
               <thead>
                 <tr>
+                  <th>T/R</th>
                   <th>Doktor / xodim</th>
                   <th>Bemor</th>
                   <th>Oxirgi xabar</th>
@@ -880,8 +926,17 @@ function MessagesPage() {
               </thead>
 
               <tbody>
-                {threads.map((thread) => (
+                {paginatedAuditThreads.map((thread, index) => (
                   <tr key={thread.id}>
+                    <td>
+                      {
+                        (auditPage - 1)
+                        * DEFAULT_PAGE_SIZE
+                        + index
+                        + 1
+                      }
+                    </td>
+
                     <td>
                       <div className="table-user">
                         <div className="mini-avatar">
@@ -947,7 +1002,7 @@ function MessagesPage() {
 
                 {!loadingThreads && threads.length === 0 && (
                   <tr>
-                    <td colSpan="6" className="chat-table-empty">
+                    <td colSpan="7" className="chat-table-empty">
                       Yozishmalar topilmadi.
                     </td>
                   </tr>
@@ -955,6 +1010,12 @@ function MessagesPage() {
               </tbody>
             </table>
           </div>
+
+          <TablePagination
+            currentPage={auditPage}
+            totalItems={threads.length}
+            onPageChange={setAuditPage}
+          />
 
         </div>
       ) : (

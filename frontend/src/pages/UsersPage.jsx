@@ -1,21 +1,27 @@
 import {
   useEffect,
+  useMemo,
   useState,
 } from 'react';
 
 import { notifications } from '@mantine/notifications';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import {
+  useNavigate,
+  useOutletContext,
+} from 'react-router-dom';
 import {
   Eye,
   MessageSquareText,
   Search,
   ShieldCheck,
-  Stethoscope,
   UserCog,
 } from 'lucide-react';
 
 import api from '../api/client';
 import MedicalInfoModal from '../components/MedicalInfoModal';
+import TablePagination, {
+  DEFAULT_PAGE_SIZE,
+} from '../components/TablePagination';
 
 
 function UsersPage() {
@@ -25,6 +31,7 @@ function UsersPage() {
   const [users, setUsers] = useState([]);
   const [doctorTypes, setDoctorTypes] = useState([]);
   const [search, setSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [draftRoles, setDraftRoles] = useState({});
   const [draftDoctorTypes, setDraftDoctorTypes] = useState({});
   const [medicalUserId, setMedicalUserId] = useState(null);
@@ -32,11 +39,15 @@ function UsersPage() {
 
   async function loadUsers() {
     try {
-      const response = await api.get('/management/users/', {
-        params: { q: search },
-      });
+      const response = await api.get(
+        '/management/users/'
+      );
 
-      setUsers(response.data);
+      setUsers(
+        Array.isArray(response.data)
+          ? response.data
+          : []
+      );
     } catch {
       setUsers([]);
     }
@@ -45,10 +56,16 @@ function UsersPage() {
 
   async function loadDoctorTypes() {
     try {
-      const response = await api.get('/doctor-types/');
+      const response = await api.get(
+        '/doctor-types/'
+      );
 
       setDoctorTypes(
-        response.data.filter((item) => item.is_active)
+        Array.isArray(response.data)
+          ? response.data.filter(
+              (item) => item.is_active
+            )
+          : []
       );
     } catch {
       setDoctorTypes([]);
@@ -63,7 +80,7 @@ function UsersPage() {
     ) {
       loadUsers();
     }
-  }, [search]);
+  }, [currentUser.role]);
 
 
   useEffect(() => {
@@ -73,7 +90,76 @@ function UsersPage() {
     ) {
       loadDoctorTypes();
     }
-  }, []);
+  }, [currentUser.role]);
+
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
+
+
+  const filteredUsers = useMemo(
+    () => {
+      const query = search
+        .trim()
+        .toLowerCase();
+
+      if (!query) {
+        return users;
+      }
+
+      return users.filter(
+        (target) => {
+          const haystack = [
+            target.first_name,
+            target.last_name,
+            target.email,
+            target.phone,
+            target.role,
+            target.role_display,
+            target.doctor_type?.name,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+
+          return haystack.includes(query);
+        }
+      );
+    },
+    [users, search]
+  );
+
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(
+      filteredUsers.length
+      / DEFAULT_PAGE_SIZE
+    )
+  );
+
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+
+  const paginatedUsers = useMemo(
+    () => {
+      const start = (
+        currentPage - 1
+      ) * DEFAULT_PAGE_SIZE;
+
+      return filteredUsers.slice(
+        start,
+        start + DEFAULT_PAGE_SIZE
+      );
+    },
+    [filteredUsers, currentPage]
+  );
 
 
   function canEditRole(target) {
@@ -86,7 +172,10 @@ function UsersPage() {
 
 
   function selectedRole(target) {
-    return draftRoles[target.id] || target.role;
+    return (
+      draftRoles[target.id]
+      || target.role
+    );
   }
 
 
@@ -126,8 +215,11 @@ function UsersPage() {
     }
 
     if (role === 'DOCTOR') {
-      return String(selectedDoctorType(target) || '')
-        !== String(target.doctor_type?.id || '');
+      return String(
+        selectedDoctorType(target) || ''
+      ) !== String(
+        target.doctor_type?.id || ''
+      );
     }
 
     return false;
@@ -139,19 +231,24 @@ function UsersPage() {
     const payload = { role };
 
     if (role === 'DOCTOR') {
-      const doctorTypeId = selectedDoctorType(target);
+      const doctorTypeId = (
+        selectedDoctorType(target)
+      );
 
       if (!doctorTypeId) {
         notifications.show({
           title: 'Doktor turini tanlang',
-          message: 'Doctor roli uchun doktor turi majburiy.',
+          message:
+            'Doctor roli uchun doktor turi majburiy.',
           color: 'orange',
         });
 
         return;
       }
 
-      payload.doctor_type_id = Number(doctorTypeId);
+      payload.doctor_type_id = Number(
+        doctorTypeId
+      );
     }
 
     try {
@@ -162,7 +259,8 @@ function UsersPage() {
 
       notifications.show({
         title: 'Rol yangilandi',
-        message: 'Foydalanuvchining roli muvaffaqiyatli saqlandi.',
+        message:
+          'Foydalanuvchining roli muvaffaqiyatli saqlandi.',
         color: 'green',
       });
 
@@ -226,13 +324,20 @@ function UsersPage() {
 
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(
+                  event.target.value
+                );
+              }}
               placeholder="Foydalanuvchi qidirish..."
             />
           </div>
 
           <div className="table-count">
-            Jami: {users.length}
+            Jami foydalanuvchi: {users.length}
+            {search && (
+              <> · Topildi: {filteredUsers.length}</>
+            )}
           </div>
         </div>
 
@@ -241,6 +346,7 @@ function UsersPage() {
           <table className="dashboard-table">
             <thead>
               <tr>
+                <th>T/R</th>
                 <th>Foydalanuvchi</th>
                 <th>Telefon</th>
                 <th>Joriy rol</th>
@@ -253,150 +359,231 @@ function UsersPage() {
             </thead>
 
             <tbody>
-              {users.map((target) => {
-                const editable = canEditRole(target);
-                const role = selectedRole(target);
-                const changed = hasRoleChanges(target);
+              {paginatedUsers.map(
+                (target, index) => {
+                  const editable = (
+                    canEditRole(target)
+                  );
 
-                return (
-                  <tr key={target.id}>
-                    <td>
-                      <div className="table-user">
-                        <div className="mini-avatar">
-                          <UserCog size={18} />
-                        </div>
+                  const role = (
+                    selectedRole(target)
+                  );
 
-                        <div>
-                          <strong>
-                            {target.first_name || 'Ismsiz'}{' '}
-                            {target.last_name || ''}
-                          </strong>
+                  const changed = (
+                    hasRoleChanges(target)
+                  );
 
-                          <span>{target.email}</span>
-                        </div>
-                      </div>
-                    </td>
-
-
-                    <td>{target.phone || '—'}</td>
-
-
-                    <td>
-                      <span className="role-table-badge">
-                        <ShieldCheck size={14} />
-                        {target.role_display}
-
-                        {target.doctor_type && (
-                          <> / {target.doctor_type.name}</>
-                        )}
-                      </span>
-                    </td>
-
-
-                    <td>
-                      <button
-                        className="table-action-button table-medical-button"
-                        type="button"
-                        onClick={() => setMedicalUserId(target.id)}
-                      >
-                        <Eye size={15} />
-                        Ko‘rish
-                      </button>
-                    </td>
-
-
-                    <td>
-                      {target.role === 'PATIENT' ? (
-                        <button
-                          className="table-action-button"
-                          type="button"
-                          onClick={() =>
-                            navigate(`/dashboard/messages?patient=${target.id}`)
-                          }
-                        >
-                          <MessageSquareText size={15} />
-                          Yozish
-                        </button>
-                      ) : (
-                        <span className="table-muted">—</span>
-                      )}
-                    </td>
-
-
-                    <td>
-                      <select
-                        className="role-select"
-                        disabled={!editable}
-                        value={role}
-                        onChange={(event) =>
-                          changeRole(target, event.target.value)
+                  return (
+                    <tr key={target.id}>
+                      <td>
+                        {
+                          (
+                            currentPage - 1
+                          )
+                          * DEFAULT_PAGE_SIZE
+                          + index
+                          + 1
                         }
-                      >
-                        <option value="PATIENT">Bemor</option>
-                        <option value="DOCTOR">Doctor</option>
-                        <option value="ADMIN">Admin</option>
+                      </td>
 
-                        {target.role === 'SUPERADMIN' && (
-                          <option value="SUPERADMIN">
-                            Superadmin
-                          </option>
+                      <td>
+                        <div className="table-user">
+                          <div className="mini-avatar">
+                            <UserCog size={18} />
+                          </div>
+
+                          <div>
+                            <strong>
+                              {target.first_name || 'Ismsiz'}{' '}
+                              {target.last_name || ''}
+                            </strong>
+
+                            <span>
+                              {target.email}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
+                        {target.phone || '—'}
+                      </td>
+
+                      <td>
+                        <span className="role-table-badge">
+                          <ShieldCheck size={14} />
+                          {target.role_display}
+
+                          {target.doctor_type && (
+                            <>
+                              {' / '}
+                              {target.doctor_type.name}
+                            </>
+                          )}
+                        </span>
+                      </td>
+
+                      <td>
+                        <button
+                          className="table-action-button table-medical-button"
+                          type="button"
+                          onClick={() => {
+                            setMedicalUserId(
+                              target.id
+                            );
+                          }}
+                        >
+                          <Eye size={15} />
+                          Ko‘rish
+                        </button>
+                      </td>
+
+                      <td>
+                        {target.role === 'PATIENT' ? (
+                          <button
+                            className="table-action-button"
+                            type="button"
+                            onClick={() => {
+                              navigate(
+                                `/dashboard/messages?patient=${target.id}`
+                              );
+                            }}
+                          >
+                            <MessageSquareText size={15} />
+                            Yozish
+                          </button>
+                        ) : (
+                          <span className="table-muted">
+                            —
+                          </span>
                         )}
-                      </select>
-                    </td>
+                      </td>
 
-
-                    <td>
-                      {role === 'DOCTOR' ? (
+                      <td>
                         <select
                           className="role-select"
                           disabled={!editable}
-                          value={selectedDoctorType(target)}
-                          onChange={(event) =>
-                            setDraftDoctorTypes((current) => ({
-                              ...current,
-                              [target.id]: event.target.value,
-                            }))
-                          }
+                          value={role}
+                          onChange={(event) => {
+                            changeRole(
+                              target,
+                              event.target.value
+                            );
+                          }}
                         >
-                          <option value="">Tanlang</option>
+                          <option value="PATIENT">
+                            Bemor
+                          </option>
 
-                          {doctorTypes.map((doctorType) => (
-                            <option
-                              key={doctorType.id}
-                              value={doctorType.id}
-                            >
-                              {doctorType.name}
+                          <option value="DOCTOR">
+                            Doctor
+                          </option>
+
+                          <option value="ADMIN">
+                            Admin
+                          </option>
+
+                          {target.role === 'SUPERADMIN' && (
+                            <option value="SUPERADMIN">
+                              Superadmin
                             </option>
-                          ))}
+                          )}
                         </select>
-                      ) : (
-                        <span className="table-muted">—</span>
-                      )}
-                    </td>
+                      </td>
 
+                      <td>
+                        {role === 'DOCTOR' ? (
+                          <select
+                            className="role-select"
+                            disabled={!editable}
+                            value={
+                              selectedDoctorType(
+                                target
+                              )
+                            }
+                            onChange={(event) => {
+                              setDraftDoctorTypes(
+                                (current) => ({
+                                  ...current,
+                                  [target.id]:
+                                    event.target.value,
+                                })
+                              );
+                            }}
+                          >
+                            <option value="">
+                              Tanlang
+                            </option>
 
-                    <td>
-                      <button
-                        className="table-action-button"
-                        disabled={!editable || !changed}
-                        onClick={() => saveRole(target)}
-                        type="button"
-                      >
-                        Saqlash
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                            {doctorTypes.map(
+                              (doctorType) => (
+                                <option
+                                  key={doctorType.id}
+                                  value={doctorType.id}
+                                >
+                                  {doctorType.name}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        ) : (
+                          <span className="table-muted">
+                            —
+                          </span>
+                        )}
+                      </td>
+
+                      <td>
+                        <button
+                          className="table-action-button"
+                          disabled={
+                            !editable
+                            || !changed
+                          }
+                          onClick={() => {
+                            saveRole(target);
+                          }}
+                          type="button"
+                        >
+                          Saqlash
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }
+              )}
+
+              {paginatedUsers.length === 0 && (
+                <tr>
+                  <td
+                    colSpan="9"
+                    style={{
+                      textAlign: 'center',
+                      padding: 28,
+                    }}
+                  >
+                    Foydalanuvchi topilmadi.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
+
+
+        <TablePagination
+          currentPage={currentPage}
+          totalItems={filteredUsers.length}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
 
       <MedicalInfoModal
         opened={Boolean(medicalUserId)}
-        onClose={() => setMedicalUserId(null)}
+        onClose={() => {
+          setMedicalUserId(null);
+        }}
         userId={medicalUserId}
       />
     </div>

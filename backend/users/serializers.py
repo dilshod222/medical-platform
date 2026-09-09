@@ -1,5 +1,8 @@
 import re
 
+from django.contrib.auth import password_validation
+from django.core.exceptions import ValidationError as DjangoValidationError
+
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -133,23 +136,9 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    # `login` is the current frontend field. `email` and `phone` are kept
-    # as backwards-compatible aliases so an older frontend cannot break login.
     login = serializers.CharField(
-        required=False,
-        allow_blank=True,
         trim_whitespace=True,
         label="Email yoki telefon",
-    )
-    email = serializers.EmailField(
-        required=False,
-        allow_blank=True,
-        write_only=True,
-    )
-    phone = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        write_only=True,
     )
     password = serializers.CharField(
         write_only=True,
@@ -157,63 +146,45 @@ class LoginSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        login_value = str(
-            attrs.get("login")
-            or attrs.get("email")
-            or attrs.get("phone")
-            or ""
-        ).strip()
+        login_value = attrs.get("login", "").strip()
         password = attrs.get("password", "")
-
-        if not login_value:
-            raise serializers.ValidationError(
-                {"login": "Email yoki telefon raqamni kiriting."}
-            )
 
         user = None
 
         if "@" in login_value:
-            candidate = User.objects.filter(
+            user = User.objects.filter(
                 email__iexact=login_value
             ).first()
-
-            if candidate and candidate.check_password(password):
-                user = candidate
         else:
             try:
                 normalized_phone = normalize_uzbek_phone(login_value)
             except serializers.ValidationError as exc:
                 raise AuthenticationFailed(
-                    "Email/telefon yoki parol noto‘g‘ri."
+                    "Email yoki telefon raqam noto‘g‘ri."
                 ) from exc
 
-            # Old local/test data may contain the same phone in more than one
-            # account. Match by both normalized phone and password. This keeps
-            # phone login usable while still rejecting a genuinely ambiguous
-            # account pair.
             matched_users = []
 
-            for candidate in User.objects.exclude(phone=""):
+            for candidate in User.objects.exclude(phone="").only(
+                "id",
+                "phone",
+            ):
                 try:
                     candidate_phone = normalize_uzbek_phone(candidate.phone)
                 except serializers.ValidationError:
                     continue
 
-                if (
-                    candidate_phone == normalized_phone
-                    and candidate.check_password(password)
-                ):
-                    matched_users.append(candidate)
+                if candidate_phone == normalized_phone:
+                    matched_users.append(candidate.id)
 
             if len(matched_users) == 1:
-                user = matched_users[0]
+                user = User.objects.filter(pk=matched_users[0]).first()
             elif len(matched_users) > 1:
                 raise AuthenticationFailed(
-                    "Bu telefon raqam va parol bir nechta akkauntga mos keldi. "
-                    "Admin orqali telefon raqamlarni ajrating."
+                    "Bu telefon raqam bir nechta akkauntga biriktirilgan. Admin bilan bog‘laning."
                 )
 
-        if not user:
+        if not user or not user.check_password(password):
             raise AuthenticationFailed(
                 "Email/telefon yoki parol noto‘g‘ri."
             )
@@ -229,6 +200,7 @@ class LoginSerializer(serializers.Serializer):
             "refresh": str(refresh),
             "access": str(refresh.access_token),
         }
+
 
 class UserSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(
@@ -280,6 +252,105 @@ class UserSerializer(serializers.ModelSerializer):
             )
 
         return normalized_phone
+
+
+class LoginCredentialsUpdateSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    phone = serializers.CharField(
+        required=True,
+        allow_blank=False,
+    )
+
+    def validate_email(self, value):
+        normalized_email = User.objects.normalize_email(
+            value.strip()
+        )
+        user = self.context["request"].user
+
+        if User.objects.filter(
+            email__iexact=normalized_email
+        ).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError(
+                "Bu email manzil boshqa akkauntga biriktirilgan."
+            )
+
+        return normalized_email
+
+    def validate_phone(self, value):
+        normalized_phone = normalize_uzbek_phone(value)
+        user = self.context["request"].user
+
+        if phone_belongs_to_another_user(
+            normalized_phone,
+            exclude_user_id=user.pk,
+        ):
+            raise serializers.ValidationError(
+                "Bu telefon raqam boshqa akkauntga biriktirilgan."
+            )
+
+        return normalized_phone
+
+    def update(self, instance, validated_data):
+        instance.email = validated_data["email"]
+        instance.phone = validated_data["phone"]
+        instance.save()
+
+        return instance
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    new_password = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False,
+        min_length=8,
+    )
+    new_password_confirm = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False,
+        min_length=8,
+    )
+
+    def validate(self, attrs):
+        user = self.context["request"].user
+        new_password = attrs["new_password"]
+        new_password_confirm = attrs["new_password_confirm"]
+
+        if new_password != new_password_confirm:
+            raise serializers.ValidationError(
+                {
+                    "new_password_confirm": "Yangi parollar bir xil emas."
+                }
+            )
+
+        if user.check_password(new_password):
+            raise serializers.ValidationError(
+                {
+                    "new_password": "Yangi parol avvalgi paroldan farq qilishi kerak."
+                }
+            )
+
+        try:
+            password_validation.validate_password(
+                new_password,
+                user=user,
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                {
+                    "new_password": list(exc.messages)
+                }
+            ) from exc
+
+        return attrs
+
+    def save(self, **kwargs):
+        user = self.context["request"].user
+        user.set_password(
+            self.validated_data["new_password"]
+        )
+        user.save()
+
+        return user
 
 
 class ManagementUserSerializer(serializers.ModelSerializer):
