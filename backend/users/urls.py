@@ -6,10 +6,12 @@ from .views import (
     DoctorPatientListView,
     DoctorTypeDetailView,
     DoctorTypeListCreateView,
+    LoginCredentialsUpdateView,
     LoginView,
     ManagementRoleUpdateView,
     ManagementUserListView,
     MeView,
+    PasswordChangeView,
     RegisterView,
 )
 
@@ -34,6 +36,16 @@ urlpatterns = [
         "users/me/",
         MeView.as_view(),
         name="me",
+    ),
+    path(
+        "users/me/login/",
+        LoginCredentialsUpdateView.as_view(),
+        name="me-login-update",
+    ),
+    path(
+        "users/me/password/",
+        PasswordChangeView.as_view(),
+        name="me-password-change",
     ),
     path(
         "doctor/patients/",

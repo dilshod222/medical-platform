@@ -1,8 +1,5 @@
 import re
 
-from django.contrib.auth import password_validation
-from django.core.exceptions import ValidationError as DjangoValidationError
-
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -84,11 +81,13 @@ class RegisterSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(required=True, allow_blank=False)
     password = serializers.CharField(
         write_only=True,
-        min_length=8,
+        trim_whitespace=False,
+        allow_blank=False,
     )
     password_confirm = serializers.CharField(
         write_only=True,
-        min_length=8,
+        trim_whitespace=False,
+        allow_blank=False,
     )
 
     class Meta:
@@ -233,15 +232,48 @@ class UserSerializer(serializers.ModelSerializer):
 
         read_only_fields = (
             "id",
-            "email",
             "role",
             "doctor_type",
             "created_at",
         )
 
+    def validate_email(self, value):
+        normalized_email = User.objects.normalize_email(
+            value.strip()
+        )
+
+        user_id = (
+            self.instance.id
+            if self.instance
+            else None
+        )
+
+        queryset = User.objects.filter(
+            email__iexact=normalized_email
+        )
+
+        if user_id:
+            queryset = queryset.exclude(
+                pk=user_id
+            )
+
+        if queryset.exists():
+            raise serializers.ValidationError(
+                "Bu email manzil boshqa akkauntga biriktirilgan."
+            )
+
+        return normalized_email
+
     def validate_phone(self, value):
-        normalized_phone = normalize_uzbek_phone(value)
-        user_id = self.instance.id if self.instance else None
+        normalized_phone = normalize_uzbek_phone(
+            value
+        )
+
+        user_id = (
+            self.instance.id
+            if self.instance
+            else None
+        )
 
         if phone_belongs_to_another_user(
             normalized_phone,
@@ -302,53 +334,36 @@ class PasswordChangeSerializer(serializers.Serializer):
     new_password = serializers.CharField(
         write_only=True,
         trim_whitespace=False,
-        min_length=8,
+        allow_blank=False,
     )
+
     new_password_confirm = serializers.CharField(
         write_only=True,
         trim_whitespace=False,
-        min_length=8,
+        allow_blank=False,
     )
 
     def validate(self, attrs):
-        user = self.context["request"].user
         new_password = attrs["new_password"]
         new_password_confirm = attrs["new_password_confirm"]
 
         if new_password != new_password_confirm:
             raise serializers.ValidationError(
                 {
-                    "new_password_confirm": "Yangi parollar bir xil emas."
+                    "new_password_confirm":
+                        "Yangi parollar bir xil emas."
                 }
             )
-
-        if user.check_password(new_password):
-            raise serializers.ValidationError(
-                {
-                    "new_password": "Yangi parol avvalgi paroldan farq qilishi kerak."
-                }
-            )
-
-        try:
-            password_validation.validate_password(
-                new_password,
-                user=user,
-            )
-        except DjangoValidationError as exc:
-            raise serializers.ValidationError(
-                {
-                    "new_password": list(exc.messages)
-                }
-            ) from exc
 
         return attrs
 
     def save(self, **kwargs):
         user = self.context["request"].user
+
         user.set_password(
             self.validated_data["new_password"]
         )
-        user.save()
+        user.save(update_fields=["password"])
 
         return user
 
